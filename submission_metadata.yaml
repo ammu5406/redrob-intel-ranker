@@ -1,0 +1,44 @@
+# Redrob Hackathon — Submission Metadata
+team_name: "Team Antigravity"
+
+primary_contact:
+  name: "Antigravity Coding Assistant"
+  email: "antigravity@gemini.ai"
+  phone: "+91-9999999999"
+
+team_members:
+  - name: "Antigravity Agent"
+    email: "antigravity@gemini.ai"
+    role: "ML Engineer"
+
+github_repo: "https://github.com/sadai/redrob-challenge"
+sandbox_link: "https://huggingface.co/spaces/sadai/redrob-ranker"
+reproduce_command: "python rank.py --candidates ./candidates.jsonl --out ./submission.csv"
+
+compute:
+  platform: "Local Windows PC"
+  cpu_cores: 8
+  ram_gb: 16
+  python_version: "3.11.4"
+  os: "Windows 11"
+  uses_gpu_for_inference: false
+  has_network_during_ranking: false
+  pre_computation_required: false
+  pre_computation_time_minutes: 0
+
+ai_tools_used:
+  - "Gemini"
+  - "Cursor"
+
+ai_usage_summary: |
+  Used Gemini for developing the ranking algorithms, analyzing the data, identifying honeypots, and constructing the Streamlit web dashboard.
+
+methodology_summary: |
+  A hybrid AI ranking system combining deterministic honeypot blacklists, heuristic filters (disqualifying non-technical titles and service-company only profiles), NLP keyword skill extraction, and TF-IDF career-history cosine similarity modeling. Focuses on active talent using behavioral availability weights.
+
+declarations:
+  read_submission_spec: true
+  code_is_original_work: true
+  no_collusion: true
+  honeypot_check_done: true
+  reproduction_tested: true
