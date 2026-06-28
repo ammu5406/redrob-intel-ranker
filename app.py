@@ -220,25 +220,15 @@ t_tfidf = time.time()
 vectorizer, candidate_vectors = get_tfidf_matrices(all_candidates)
 print(f"--- app.py: get_tfidf_matrices returned in {time.time() - t_tfidf:.4f}s")
 
-# Sidebar Weight Adjustments
-st.sidebar.markdown("### 🤖 Scoring Parameters")
-st.sidebar.caption("Fine-tune weights for candidate discovery")
+# Fixed parameters for candidate ranking
+w_yoe = 1.0
+w_loc = 1.0
+w_title = 1.0
+w_skill = 1.0
+w_sem = 1.0
+w_beh = 1.0
 
-w_yoe = st.sidebar.slider("Experience Fit Weight", 0.0, 2.0, 1.0, 0.1)
-w_loc = st.sidebar.slider("Location Fit Weight", 0.0, 2.0, 1.0, 0.1)
-w_title = st.sidebar.slider("Title / Headline Weight", 0.0, 2.0, 1.0, 0.1)
-w_skill = st.sidebar.slider("NLP Skill Overlap Weight", 0.0, 2.0, 1.0, 0.1)
-w_sem = st.sidebar.slider("Semantic Similarity Weight", 0.0, 2.0, 1.0, 0.1)
-w_beh = st.sidebar.slider("Behavioral Signal Weight", 0.0, 2.0, 1.0, 0.1)
-
-# Dynamic Job Description Editor
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📝 Job Description")
-jd_editor = st.sidebar.text_area(
-    "Custom Job Description requirements:",
-    value="""Senior AI Engineer — Founding Team. Embeddings-based retrieval systems (sentence-transformers, OpenAI embeddings, BGE, E5), vector databases (Pinecone, Weaviate, Qdrant, Milvus, OpenSearch, Elasticsearch, FAISS), Python, evaluation frameworks (NDCG, MRR, MAP, A/B testing), nice to have fine-tuning LLMs (LoRA, QLoRA, PEFT).""",
-    height=200
-)
+jd_editor = """Senior AI Engineer — Founding Team. Embeddings-based retrieval systems (sentence-transformers, OpenAI embeddings, BGE, E5), vector databases (Pinecone, Weaviate, Qdrant, Milvus, OpenSearch, Elasticsearch, FAISS), Python, evaluation frameworks (NDCG, MRR, MAP, A/B testing), nice to have fine-tuning LLMs (LoRA, QLoRA, PEFT)."""
 
 # Re-evaluate based on weights
 @st.cache_data(show_spinner=False)
@@ -430,7 +420,7 @@ with col_m3:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Main Grid Layout
-col_table, col_profile = st.columns([1.1, 0.9])
+col_profile, col_table = st.columns([1.2, 0.8])
 
 with col_table:
     st.markdown("### 🏆 Candidate Discovery Shortlist (Top 100)")
