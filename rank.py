@@ -96,7 +96,31 @@ def main():
         print(f"Error writing CSV: {e}")
         sys.exit(1)
         
+    # Write to JSON for fast Streamlit loading
+    json_out_path = os.path.join(os.path.dirname(out_path) or ".", "top_candidates.json")
+    print(f"Writing top candidates metadata to {json_out_path}...")
+    try:
+        json_data = {
+            "total_scanned": len(candidates),
+            "filtered_honeypots": len([item for item in scored_list if item[1] == -1.0]),
+            "shortlist": [
+                {
+                    "candidate_id": row["candidate_id"],
+                    "rank": row["rank"],
+                    "score": row["score"],
+                    "reasoning": row["reasoning"],
+                    "candidate_data": top_100[idx][3]
+                }
+                for idx, row in enumerate(shortlist)
+            ]
+        }
+        with open(json_out_path, "w", encoding="utf-8") as f:
+            json.dump(json_data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error writing JSON: {e}")
+        
     print("Done! Shortlist generated successfully.")
 
 if __name__ == "__main__":
     main()
+

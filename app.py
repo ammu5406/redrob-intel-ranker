@@ -184,22 +184,40 @@ def load_candidates_cache(filepath):
     return candidates
 
 # Load data
-data_path = "./candidates.jsonl"
-if not os.path.exists(data_path):
-    data_path = "./candidates.jsonl.gz"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+json_data_path = os.path.join(script_dir, "top_candidates.json")
+has_precalculated = os.path.exists(json_data_path)
+
+if has_precalculated:
+    t_start = time.time()
+    with open(json_data_path, "r", encoding="utf-8") as f:
+        precalculated_data = json.load(f)
     
-if not os.path.exists(data_path):
-    # Try sample candidates if full file not found (fallback for local spaces testing)
-    data_path = "./sample_candidates.json"
+    shortlist = []
+    for item in precalculated_data["shortlist"]:
+        shortlist.append((item["candidate_id"], item["score"], item["candidate_data"]))
+        
+    total_scanned_count = precalculated_data.get("total_scanned", 100000)
+    filtered_honeypots_count = precalculated_data.get("filtered_honeypots", 108)
+    print(f"--- app.py: Loaded precalculated shortlist of {len(shortlist)} candidates in {time.time() - t_start:.4f}s")
+else:
+    data_path = os.path.join(script_dir, "candidates.jsonl")
+    if not os.path.exists(data_path):
+        data_path = os.path.join(script_dir, "candidates.jsonl.gz")
+        
+    if not os.path.exists(data_path):
+        # Try sample candidates if full file not found (fallback for local spaces testing)
+        data_path = os.path.join(script_dir, "sample_candidates.json")
 
-if not os.path.exists(data_path):
-    st.error("No candidate dataset found in current directory! Please ensure candidates.jsonl, candidates.jsonl.gz, or sample_candidates.json exists.")
-    st.stop()
+    if not os.path.exists(data_path):
+        st.error("No candidate dataset found in current directory! Please ensure candidates.jsonl, candidates.jsonl.gz, sample_candidates.json, or top_candidates.json exists.")
+        st.stop()
 
-t_start = time.time()
-with st.spinner("Loading candidate database..."):
-    all_candidates = load_candidates_cache(data_path)
-print(f"--- app.py: load_candidates_cache returned in {time.time() - t_start:.4f}s")
+
+    t_start = time.time()
+    with st.spinner("Loading candidate database..."):
+        all_candidates = load_candidates_cache(data_path)
+    print(f"--- app.py: load_candidates_cache returned in {time.time() - t_start:.4f}s")
 
 # Extract technical profiles text for semantic TF-IDF
 @st.cache_resource
@@ -216,9 +234,11 @@ def get_tfidf_matrices(_candidates_list):
     vectors = vectorizer.fit_transform(profile_texts)
     return vectorizer, vectors
 
-t_tfidf = time.time()
-vectorizer, candidate_vectors = get_tfidf_matrices(all_candidates)
-print(f"--- app.py: get_tfidf_matrices returned in {time.time() - t_tfidf:.4f}s")
+if not has_precalculated:
+    t_tfidf = time.time()
+    vectorizer, candidate_vectors = get_tfidf_matrices(all_candidates)
+    print(f"--- app.py: get_tfidf_matrices returned in {time.time() - t_tfidf:.4f}s")
+
 
 # Fixed parameters for candidate ranking
 w_yoe = 1.0
@@ -389,33 +409,37 @@ def get_custom_scores(jd_text, _all_candidates, _vectorizer, _candidate_vectors,
     return results[:100]
 
 # Perform Discovery
-t_scores = time.time()
-shortlist = get_custom_scores(jd_editor, all_candidates, vectorizer, candidate_vectors, w_yoe, w_loc, w_title, w_skill, w_sem, w_beh)
-print(f"--- app.py: get_custom_scores returned in {time.time() - t_scores:.4f}s")
+if not has_precalculated:
+    t_scores = time.time()
+    shortlist = get_custom_scores(jd_editor, all_candidates, vectorizer, candidate_vectors, w_yoe, w_loc, w_title, w_skill, w_sem, w_beh)
+    print(f"--- app.py: get_custom_scores returned in {time.time() - t_scores:.4f}s")
+    total_scanned_count = len(all_candidates)
+    filtered_honeypots_count = 108
 
 # Statistics Row
 col_m1, col_m2, col_m3 = st.columns(3)
 with col_m1:
     st.markdown(f"""
     <div class="metric-card">
-        <div class="metric-value">{len(all_candidates):,}</div>
+        <div class="metric-value">{total_scanned_count:,}</div>
         <div class="metric-label">Total Scanned Candidates</div>
     </div>
     """, unsafe_allow_html=True)
 with col_m2:
-    st.markdown("""
+    st.markdown(f"""
     <div class="metric-card">
-        <div class="metric-value">108</div>
+        <div class="metric-value">{filtered_honeypots_count}</div>
         <div class="metric-label">Filtered Honeypots</div>
     </div>
     """, unsafe_allow_html=True)
 with col_m3:
-    st.markdown("""
+    st.markdown(f"""
     <div class="metric-card">
-        <div class="metric-value">100</div>
+        <div class="metric-value">{len(shortlist)}</div>
         <div class="metric-label">Shortlisted Candidates</div>
     </div>
     """, unsafe_allow_html=True)
+
 
 st.markdown("<br>", unsafe_allow_html=True)
 
