@@ -4,10 +4,14 @@ import gzip
 import pandas as pd
 import numpy as np
 import os
+import time
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from rank_core import is_honeypot, evaluate_candidates, generate_custom_reasoning, SERVICE_COMPANIES
+
+print("\n=== STARTING SCRIPT RERUN ===")
+t_total_start = time.time()
 
 # Page Configuration
 st.set_page_config(
@@ -168,7 +172,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Cache Candidate Data
-@st.cache_data
+@st.cache_resource
 def load_candidates_cache(filepath):
     candidates = []
     open_func = gzip.open if filepath.endswith(".gz") else open
@@ -192,14 +196,16 @@ if not os.path.exists(data_path):
     st.error("No candidate dataset found in current directory! Please ensure candidates.jsonl, candidates.jsonl.gz, or sample_candidates.json exists.")
     st.stop()
 
+t_start = time.time()
 with st.spinner("Loading candidate database..."):
     all_candidates = load_candidates_cache(data_path)
+print(f"--- app.py: load_candidates_cache returned in {time.time() - t_start:.4f}s")
 
 # Extract technical profiles text for semantic TF-IDF
 @st.cache_resource
-def get_tfidf_matrices(candidates_list):
+def get_tfidf_matrices(_candidates_list):
     profile_texts = []
-    for c in candidates_list:
+    for c in _candidates_list:
         prof = c.get("profile", {})
         skills_str = " ".join([s.get("name", "") for s in c.get("skills", [])])
         career_str = " ".join([job.get("title", "") + " " + job.get("description", "") for job in c.get("career_history", [])])
@@ -210,7 +216,9 @@ def get_tfidf_matrices(candidates_list):
     vectors = vectorizer.fit_transform(profile_texts)
     return vectorizer, vectors
 
+t_tfidf = time.time()
 vectorizer, candidate_vectors = get_tfidf_matrices(all_candidates)
+print(f"--- app.py: get_tfidf_matrices returned in {time.time() - t_tfidf:.4f}s")
 
 # Sidebar Weight Adjustments
 st.sidebar.markdown("### 🤖 Scoring Parameters")
@@ -234,7 +242,7 @@ jd_editor = st.sidebar.text_area(
 
 # Re-evaluate based on weights
 @st.cache_data(show_spinner=False)
-def get_custom_scores(jd_text, _vectorizer, _candidate_vectors, w_yoe, w_loc, w_title, w_skill, w_sem, w_beh):
+def get_custom_scores(jd_text, _all_candidates, _vectorizer, _candidate_vectors, w_yoe, w_loc, w_title, w_skill, w_sem, w_beh):
     # Compute semantic cosine similarity
     jd_vector = _vectorizer.transform([jd_text])
     similarities = cosine_similarity(_candidate_vectors, jd_vector).flatten()
@@ -257,7 +265,7 @@ def get_custom_scores(jd_text, _vectorizer, _candidate_vectors, w_yoe, w_loc, w_
     
     results = []
     
-    for idx, c in enumerate(all_candidates):
+    for idx, c in enumerate(_all_candidates):
         cid = c.get("candidate_id")
         
         # Blacklist
@@ -391,7 +399,9 @@ def get_custom_scores(jd_text, _vectorizer, _candidate_vectors, w_yoe, w_loc, w_
     return results[:100]
 
 # Perform Discovery
-shortlist = get_custom_scores(jd_editor, vectorizer, candidate_vectors, w_yoe, w_loc, w_title, w_skill, w_sem, w_beh)
+t_scores = time.time()
+shortlist = get_custom_scores(jd_editor, all_candidates, vectorizer, candidate_vectors, w_yoe, w_loc, w_title, w_skill, w_sem, w_beh)
+print(f"--- app.py: get_custom_scores returned in {time.time() - t_scores:.4f}s")
 
 # Statistics Row
 col_m1, col_m2, col_m3 = st.columns(3)
@@ -465,63 +475,58 @@ sel_score = df.loc[selected_idx, "Match Score"]
 sel_reason = generate_custom_reasoning(sel_cand, sel_rank, sel_score)
 
 with col_profile:
-    st.markdown(f"### 👤 Candidate Profiler")
-    
+    st.markdown("### 👤 Candidate Profiler")
     # Premium Profile Card UI
-    st.markdown(f"""
-    <div class="profile-card">
-        <div style="display: flex; justify-content: space-between; align-items: start;">
-            <div>
-                <div class="profile-name">{sel_prof.get('anonymized_name')}</div>
-                <div class="profile-title">{sel_prof.get('current_title')} at {sel_prof.get('current_company')}</div>
-                <div style="color: #b0a3c4; font-size: 0.9rem; margin-top: 0.3rem;">{sel_prof.get('location')}, {sel_prof.get('country')}</div>
-            </div>
-            <div style="background: linear-gradient(135deg, #ff7bf2 0%, #9e5fff 100%); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 800; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
-                #{sel_rank}
-            </div>
-        </div>
-        <div style="margin-top: 1.5rem;">
-            <span class="badge badge-core">{sel_prof.get('years_of_experience')} Years Experience</span>
-            <span class="badge badge-location">{"Open to Relocate" if sel_sigs.get('willing_to_relocate') else "Stationary"}</span>
-            <span class="badge badge-core">Notice: {sel_sigs.get('notice_period_days')} days</span>
-        </div>
-        
-        <div style="margin-top: 1.5rem;">
-            <div class="score-breakdown-row">
-                <span class="score-label">Years of Experience Score</span>
-                <span class="score-val">{sel_match.get('yoe_score')} / 10.0</span>
-            </div>
-            <div class="score-breakdown-row">
-                <span class="score-label">Location Fit Score</span>
-                <span class="score-val">{sel_match.get('loc_score')} / 10.0</span>
-            </div>
-            <div class="score-breakdown-row">
-                <span class="score-label">Title/Headline Match</span>
-                <span class="score-val">{sel_match.get('title_score')} / 10.0</span>
-            </div>
-            <div class="score-breakdown-row">
-                <span class="score-label">NLP Skill Overlap</span>
-                <span class="score-val">{sel_match.get('nlp_skill_score')} / 20.0</span>
-            </div>
-            <div class="score-breakdown-row">
-                <span class="score-label">Semantic Cosine Similarity</span>
-                <span class="score-val">{sel_match.get('sem_score')} / 40.0</span>
-            </div>
-            <div class="score-breakdown-row">
-                <span class="score-label">Behavioral Availability Score</span>
-                <span class="score-val">{sel_match.get('behavioral_score')} / 10.0</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 1.2rem; margin-top: 1rem; color: #ff7bf2;">
-                <span>Composite Discovery Score</span>
-                <span>{sel_score} pts</span>
-            </div>
-        </div>
-        
-        <div class="reasoning-box">
-            " {sel_reason} "
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div class="profile-card">
+<div style="display: flex; justify-content: space-between; align-items: start;">
+<div>
+<div class="profile-name">{sel_prof.get('anonymized_name')}</div>
+<div class="profile-title">{sel_prof.get('current_title')} at {sel_prof.get('current_company')}</div>
+<div style="color: #b0a3c4; font-size: 0.9rem; margin-top: 0.3rem;">{sel_prof.get('location')}, {sel_prof.get('country')}</div>
+</div>
+<div style="background: linear-gradient(135deg, #ff7bf2 0%, #9e5fff 100%); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 800; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+#{sel_rank}
+</div>
+</div>
+<div style="margin-top: 1.5rem;">
+<span class="badge badge-core">{sel_prof.get('years_of_experience')} Years Experience</span>
+<span class="badge badge-location">{"Open to Relocate" if sel_sigs.get('willing_to_relocate') else "Stationary"}</span>
+<span class="badge badge-core">Notice: {sel_sigs.get('notice_period_days')} days</span>
+</div>
+<div style="margin-top: 1.5rem;">
+<div class="score-breakdown-row">
+<span class="score-label">Years of Experience Score</span>
+<span class="score-val">{sel_match.get('yoe_score')} / 10.0</span>
+</div>
+<div class="score-breakdown-row">
+<span class="score-label">Location Fit Score</span>
+<span class="score-val">{sel_match.get('loc_score')} / 10.0</span>
+</div>
+<div class="score-breakdown-row">
+<span class="score-label">Title/Headline Match</span>
+<span class="score-val">{sel_match.get('title_score')} / 10.0</span>
+</div>
+<div class="score-breakdown-row">
+<span class="score-label">NLP Skill Overlap</span>
+<span class="score-val">{sel_match.get('nlp_skill_score')} / 20.0</span>
+</div>
+<div class="score-breakdown-row">
+<span class="score-label">Semantic Cosine Similarity</span>
+<span class="score-val">{sel_match.get('sem_score')} / 40.0</span>
+</div>
+<div class="score-breakdown-row">
+<span class="score-label">Behavioral Availability Score</span>
+<span class="score-val">{sel_match.get('behavioral_score')} / 10.0</span>
+</div>
+<div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 1.2rem; margin-top: 1rem; color: #ff7bf2;">
+<span>Composite Discovery Score</span>
+<span>{sel_score} pts</span>
+</div>
+</div>
+<div class="reasoning-box">
+" {sel_reason} "
+</div>
+</div>""", unsafe_allow_html=True)
     
     # Detailed career timeline tabs
     tab_exp, tab_edu, tab_skills = st.tabs(["💼 Career Timeline", "🎓 Education", "🛠️ Complete Skills"])
@@ -549,3 +554,5 @@ with col_profile:
                 st.write(f"Level: {skill.get('proficiency')}")
             with col_s3:
                 st.write(f"Endorsed: {skill.get('endorsements')}")
+
+print(f"=== SCRIPT RERUN FINISHED in {time.time() - t_total_start:.4f}s ===\n")
