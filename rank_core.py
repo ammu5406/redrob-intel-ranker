@@ -2,17 +2,19 @@ import re
 import json
 import numpy as np
 from datetime import datetime
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 # 1. Start date parser helper
 def parse_date(d_str):
     if not d_str:
         return None
     try:
-        return datetime.strptime(d_str, "%Y-%m-%d")
+        parts = d_str.split("-")
+        return datetime(int(parts[0]), int(parts[1]), int(parts[2]))
     except:
-        return None
+        try:
+            return datetime.strptime(d_str, "%Y-%m-%d")
+        except:
+            return None
 
 # 2. Honeypot check
 def is_honeypot(c):
@@ -60,6 +62,7 @@ NICE_SKILL_GROUPS = {
 
 # 6. Fit TF-IDF on candidate pool (we pass the list of texts)
 def build_tfidf_model(texts):
+    from sklearn.feature_extraction.text import TfidfVectorizer
     # Fit a tf-idf vectorizer on candidate texts
     vectorizer = TfidfVectorizer(
         stop_words="english",
@@ -71,6 +74,7 @@ def build_tfidf_model(texts):
 
 # 7. Candidate Scorer
 def evaluate_candidates(candidates_list, jd_text):
+    from sklearn.metrics.pairwise import cosine_similarity
     # Gather texts for tf-idf fitting
     profile_texts = []
     for c in candidates_list:

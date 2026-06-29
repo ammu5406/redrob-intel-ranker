@@ -6,9 +6,7 @@ import numpy as np
 import os
 import time
 from datetime import datetime
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from rank_core import is_honeypot, evaluate_candidates, generate_custom_reasoning, SERVICE_COMPANIES
+from rank_core import generate_custom_reasoning
 
 print("\n=== STARTING SCRIPT RERUN ===")
 t_total_start = time.time()
@@ -188,17 +186,22 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 json_data_path = os.path.join(script_dir, "top_candidates.json")
 has_precalculated = os.path.exists(json_data_path)
 
-if has_precalculated:
-    t_start = time.time()
-    with open(json_data_path, "r", encoding="utf-8") as f:
+@st.cache_data
+def load_precalculated_data(filepath):
+    with open(filepath, "r", encoding="utf-8") as f:
         precalculated_data = json.load(f)
     
     shortlist = []
     for item in precalculated_data["shortlist"]:
         shortlist.append((item["candidate_id"], item["score"], item["candidate_data"]))
         
-    total_scanned_count = precalculated_data.get("total_scanned", 100000)
-    filtered_honeypots_count = precalculated_data.get("filtered_honeypots", 108)
+    total_scanned = precalculated_data.get("total_scanned", 100000)
+    filtered_honeypots = precalculated_data.get("filtered_honeypots", 108)
+    return shortlist, total_scanned, filtered_honeypots
+
+if has_precalculated:
+    t_start = time.time()
+    shortlist, total_scanned_count, filtered_honeypots_count = load_precalculated_data(json_data_path)
     print(f"--- app.py: Loaded precalculated shortlist of {len(shortlist)} candidates in {time.time() - t_start:.4f}s")
 else:
     data_path = os.path.join(script_dir, "candidates.jsonl")
@@ -222,6 +225,7 @@ else:
 # Extract technical profiles text for semantic TF-IDF
 @st.cache_resource
 def get_tfidf_matrices(_candidates_list):
+    from sklearn.feature_extraction.text import TfidfVectorizer
     profile_texts = []
     for c in _candidates_list:
         prof = c.get("profile", {})
@@ -253,6 +257,8 @@ jd_editor = """Senior AI Engineer — Founding Team. Embeddings-based retrieval 
 # Re-evaluate based on weights
 @st.cache_data(show_spinner=False)
 def get_custom_scores(jd_text, _all_candidates, _vectorizer, _candidate_vectors, w_yoe, w_loc, w_title, w_skill, w_sem, w_beh):
+    from sklearn.metrics.pairwise import cosine_similarity
+    from rank_core import is_honeypot
     # Compute semantic cosine similarity
     jd_vector = _vectorizer.transform([jd_text])
     similarities = cosine_similarity(_candidate_vectors, jd_vector).flatten()
