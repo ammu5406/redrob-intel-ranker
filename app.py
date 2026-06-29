@@ -6,7 +6,7 @@ import numpy as np
 import os
 import time
 from datetime import datetime
-from rank_core import generate_custom_reasoning
+from rank_core import generate_custom_reasoning, is_honeypot
 
 print("\n=== STARTING SCRIPT RERUN ===")
 t_total_start = time.time()
@@ -161,6 +161,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Check for precalculated data path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+json_data_path = os.path.join(script_dir, "top_candidates.json")
+has_precalculated = os.path.exists(json_data_path)
+
 # Application Heading
 st.markdown("""
 <div class="header-container">
@@ -169,22 +174,63 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Cache Candidate Data
-@st.cache_resource
-def load_candidates_cache(filepath):
-    candidates = []
+# Mode Banner
+if has_precalculated:
+    st.success("⚡ **Precalculated Mode Active:** Shortlist loaded instantly from `top_candidates.json`.")
+else:
+    st.warning("⚠️ **Dynamic Fallback Mode Active:** `top_candidates.json` not found. Evaluating candidates on the fly.")
+    st.info("💡 **Speed Tip:** To make the app run instantly on Streamlit Community Cloud, run the ranking script locally to generate the precalculated data: `python rank.py --candidates ./candidates.jsonl --out ./submission.csv`, then commit and push `top_candidates.json` to GitHub.")
+
+# Cache Candidate Data (Streaming & Pre-filtering to optimize memory & CPU on Cloud)
+@st.cache_data
+def load_and_filter_candidates(filepath):
+    SERVICE_COMPANIES = {'tcs', 'infosys', 'wipro', 'accenture', 'cognizant', 'capgemini', 'hcl', 'tech mahindra', 'mindtree', 'mphasis'}
+    non_tech_titles = {'marketing manager', 'accountant', 'hr manager', 'operations manager', 'graphic designer', 'civil engineer', 'customer support', 'sales executive', 'project manager'}
+    
+    valid_candidates = []
+    total_scanned = 0
+    filtered_honeypots = 0
+    
     open_func = gzip.open if filepath.endswith(".gz") else open
     with open_func(filepath, "rt", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
                 continue
-            candidates.append(json.loads(line))
-    return candidates
-
-# Load data
-script_dir = os.path.dirname(os.path.abspath(__file__))
-json_data_path = os.path.join(script_dir, "top_candidates.json")
-has_precalculated = os.path.exists(json_data_path)
+            total_scanned += 1
+            c = json.loads(line)
+            
+            # 1. Blacklist / Honeypot check
+            if is_honeypot(c):
+                filtered_honeypots += 1
+                continue
+                
+            profile = c.get("profile", {})
+            career = c.get("career_history", [])
+            signals = c.get("redrob_signals", {})
+            
+            # 2. Heuristic filters: Service company only
+            all_companies = {job.get("company", "").lower() for job in career if job.get("company")}
+            if all_companies and all_companies.issubset(SERVICE_COMPANIES):
+                continue
+                
+            # 3. Non-tech title check
+            current_title = profile.get("current_title", "").lower()
+            if current_title in non_tech_titles:
+                continue
+                
+            # 4. Location & Relocation Fit
+            loc = profile.get("location", "").lower()
+            country = profile.get("country", "").lower()
+            relocate = signals.get("willing_to_relocate", False)
+            in_target_city = any(city in loc for city in ["noida", "pune", "gurgaon", "delhi", "ncr"])
+            in_tier1_india = any(city in loc for city in ["bangalore", "bengaluru", "hyderabad", "mumbai", "chennai", "kolkata", "chandigarh", "ahmedabad", "coimbatore", "kochi", "trivandrum", "indore"]) or country == "india"
+            
+            if not (in_target_city or in_tier1_india or relocate):
+                continue
+                
+            valid_candidates.append(c)
+            
+    return valid_candidates, total_scanned, filtered_honeypots
 
 @st.cache_data
 def load_precalculated_data(filepath):
@@ -216,11 +262,10 @@ else:
         st.error("No candidate dataset found in current directory! Please ensure candidates.jsonl, candidates.jsonl.gz, sample_candidates.json, or top_candidates.json exists.")
         st.stop()
 
-
     t_start = time.time()
-    with st.spinner("Loading candidate database..."):
-        all_candidates = load_candidates_cache(data_path)
-    print(f"--- app.py: load_candidates_cache returned in {time.time() - t_start:.4f}s")
+    with st.spinner("Loading candidate database (Streaming & Pre-filtering)..."):
+        all_candidates, total_scanned_count, filtered_honeypots_count = load_and_filter_candidates(data_path)
+    print(f"--- app.py: load_and_filter_candidates returned {len(all_candidates)} candidates in {time.time() - t_start:.4f}s")
 
 # Extract technical profiles text for semantic TF-IDF
 @st.cache_resource
