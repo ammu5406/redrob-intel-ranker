@@ -1,0 +1,17 @@
+# Large Data Files (Must not be pushed to GitHub due to 100MB file limit)
+candidates.jsonl
+candidates.jsonl.gz
+
+# Local output / submission files
+*.csv
+*.xlsx
+
+# Python cache & virtualenv
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Streamlit local config / secrets
+.streamlit/secrets.toml
