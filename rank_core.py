@@ -32,6 +32,25 @@ def is_honeypot(c):
             dur = job.get("duration_months", 0)
             if (start and start.year < 2023) or dur >= 36:
                 return True
+                
+    # Rule 3: Impossible certifications (e.g., LangChain certified before 2023 or certifications in the future)
+    certs = c.get("certifications", [])
+    for cert in certs:
+        name = cert.get("name", "").lower()
+        year = cert.get("year")
+        if "langchain" in name and year and year < 2023:
+            return True
+        if year and year > 2026:
+            return True
+            
+    # Rule 4: YOE vs Career History Discrepancy (profile YOE differs by > 4.0 years from actual job history sum)
+    profile = c.get("profile", {})
+    yoe = profile.get("years_of_experience", 0.0)
+    total_months = sum(job.get("duration_months", 0) for job in career)
+    career_years = total_months / 12.0
+    if abs(yoe - career_years) > 4.0:
+        return True
+        
     return False
 
 # 3. List of service companies to filter

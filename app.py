@@ -162,8 +162,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Check for precalculated data path
+cwd = os.getcwd()
 script_dir = os.path.dirname(os.path.abspath(__file__))
-json_data_path = os.path.join(script_dir, "top_candidates.json")
+
+json_data_path = os.path.join(cwd, "top_candidates.json")
+if not os.path.exists(json_data_path):
+    json_data_path = os.path.join(script_dir, "top_candidates.json")
+
 has_precalculated = os.path.exists(json_data_path)
 
 # Application Heading
@@ -173,13 +178,6 @@ st.markdown("""
     <div class="header-subtitle">Founding Senior AI Engineer Candidate Discovery Portal</div>
 </div>
 """, unsafe_allow_html=True)
-
-# Mode Banner
-if has_precalculated:
-    st.success("⚡ **Precalculated Mode Active:** Shortlist loaded instantly from `top_candidates.json`.")
-else:
-    st.warning("⚠️ **Dynamic Fallback Mode Active:** `top_candidates.json` not found. Evaluating candidates on the fly.")
-    st.info("💡 **Speed Tip:** To make the app run instantly on Streamlit Community Cloud, run the ranking script locally to generate the precalculated data: `python rank.py --candidates ./candidates.jsonl --out ./submission.csv`, then commit and push `top_candidates.json` to GitHub.")
 
 # Cache Candidate Data (Streaming & Pre-filtering to optimize memory & CPU on Cloud)
 @st.cache_data
@@ -191,14 +189,26 @@ def load_and_filter_candidates(filepath):
     total_scanned = 0
     filtered_honeypots = 0
     
-    open_func = gzip.open if filepath.endswith(".gz") else open
-    with open_func(filepath, "rt", encoding="utf-8") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            total_scanned += 1
-            c = json.loads(line)
+    # Check if the file is standard JSON array format or JSON Lines
+    is_json_array = False
+    if filepath.endswith(".json"):
+        open_func_check = gzip.open if filepath.endswith(".gz") else open
+        try:
+            with open_func_check(filepath, "rt", encoding="utf-8") as f:
+                first_char = f.read(1)
+                if first_char == "[":
+                    is_json_array = True
+        except:
+            pass
+
+    if is_json_array:
+        # Standard JSON array load
+        open_func = gzip.open if filepath.endswith(".gz") else open
+        with open_func(filepath, "rt", encoding="utf-8") as f:
+            candidates_list = json.load(f)
             
+        for c in candidates_list:
+            total_scanned += 1
             # 1. Blacklist / Honeypot check
             if is_honeypot(c):
                 filtered_honeypots += 1
@@ -229,7 +239,50 @@ def load_and_filter_candidates(filepath):
                 continue
                 
             valid_candidates.append(c)
-            
+    else:
+        # Streaming JSON Lines load
+        open_func = gzip.open if filepath.endswith(".gz") else open
+        with open_func(filepath, "rt", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                total_scanned += 1
+                try:
+                    c = json.loads(line)
+                except Exception:
+                    continue
+                
+                # 1. Blacklist / Honeypot check
+                if is_honeypot(c):
+                    filtered_honeypots += 1
+                    continue
+                    
+                profile = c.get("profile", {})
+                career = c.get("career_history", [])
+                signals = c.get("redrob_signals", {})
+                
+                # 2. Heuristic filters: Service company only
+                all_companies = {job.get("company", "").lower() for job in career if job.get("company")}
+                if all_companies and all_companies.issubset(SERVICE_COMPANIES):
+                    continue
+                    
+                # 3. Non-tech title check
+                current_title = profile.get("current_title", "").lower()
+                if current_title in non_tech_titles:
+                    continue
+                    
+                # 4. Location & Relocation Fit
+                loc = profile.get("location", "").lower()
+                country = profile.get("country", "").lower()
+                relocate = signals.get("willing_to_relocate", False)
+                in_target_city = any(city in loc for city in ["noida", "pune", "gurgaon", "delhi", "ncr"])
+                in_tier1_india = any(city in loc for city in ["bangalore", "bengaluru", "hyderabad", "mumbai", "chennai", "kolkata", "chandigarh", "ahmedabad", "coimbatore", "kochi", "trivandrum", "indore"]) or country == "india"
+                
+                if not (in_target_city or in_tier1_india or relocate):
+                    continue
+                    
+                valid_candidates.append(c)
+                
     return valid_candidates, total_scanned, filtered_honeypots
 
 @st.cache_data
@@ -250,15 +303,22 @@ if has_precalculated:
     shortlist, total_scanned_count, filtered_honeypots_count = load_precalculated_data(json_data_path)
     print(f"--- app.py: Loaded precalculated shortlist of {len(shortlist)} candidates in {time.time() - t_start:.4f}s")
 else:
-    data_path = os.path.join(script_dir, "candidates.jsonl")
-    if not os.path.exists(data_path):
-        data_path = os.path.join(script_dir, "candidates.jsonl.gz")
-        
-    if not os.path.exists(data_path):
-        # Try sample candidates if full file not found (fallback for local spaces testing)
-        data_path = os.path.join(script_dir, "sample_candidates.json")
-
-    if not os.path.exists(data_path):
+    # Try finding candidates.jsonl or gz or sample in CWD and script_dir
+    possible_paths = [
+        os.path.join(cwd, "candidates.jsonl"),
+        os.path.join(script_dir, "candidates.jsonl"),
+        os.path.join(cwd, "candidates.jsonl.gz"),
+        os.path.join(script_dir, "candidates.jsonl.gz"),
+        os.path.join(cwd, "sample_candidates.json"),
+        os.path.join(script_dir, "sample_candidates.json")
+    ]
+    data_path = None
+    for p in possible_paths:
+        if os.path.exists(p):
+            data_path = p
+            break
+            
+    if not data_path:
         st.error("No candidate dataset found in current directory! Please ensure candidates.jsonl, candidates.jsonl.gz, sample_candidates.json, or top_candidates.json exists.")
         st.stop()
 
